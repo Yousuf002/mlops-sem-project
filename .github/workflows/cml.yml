@@ -1,0 +1,52 @@
+name: CML - Model Comparison
+
+on:
+  pull_request:
+    branches: [test]
+
+jobs:
+  train-and-report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install scikit-learn pandas joblib mlflow
+
+      - name: Run training & get new RMSE
+        id: train
+        run: |
+          python scripts/train.py data/processed/processed_data_*.csv > train.log 2>&1
+          NEW_RMSE=$(grep "Test RMSE" train.log | tail -1 | awk '{print $4}')
+          echo "NEW_RMSE=$NEW_RMSE" >> $GITHUB_ENV
+
+      - name: Get current production RMSE (from master)
+        run: |
+          git checkout master
+          python scripts/train.py data/processed/processed_data_*.csv > master.log 2>&1 || true
+          OLD_RMSE=$(grep "Test RMSE" master.log | tail -1 | awk '{print $4}' || echo "999")
+          echo "OLD_RMSE=$OLD_RMSE" >> $GITHUB_ENV
+
+      - name: CML Report
+        uses: iterative/cml@v2
+        env:
+          REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          comment: |
+            Model Performance Comparison
+            
+            Current production (master): **Test RMSE = ${{ env.OLD_RMSE }}**
+            New model (this PR): **Test RMSE = ${{ env.NEW_RMSE }}**
+            
+            ${{ env.NEW_RMSE < env.OLD_RMSE && 'New model is BETTER' || 'New model is WORSE → merge blocked' }}
