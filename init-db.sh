@@ -6,4 +6,4 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "postgres" <<-EOSQL
     GRANT ALL PRIVILEGES ON DATABASE mlflow TO airflow;
 EOSQL
 
-echo "MLflow database created successfully!"
+echo "MLflow database created successfully!d"
