@@ -1,0 +1,14 @@
+"filename", "language", "Python", "YAML", "Docker", "pip requirements", "Batch", "CSV", "comment", "blank", "total"
+"d:\sem9\mlops\project\Dockerfile", "Docker", 0, 0, 7, 0, 0, 0, 0, 5, 12
+"d:\sem9\mlops\project\app\main.py", "Python", 29, 0, 0, 0, 0, 0, 4, 7, 40
+"d:\sem9\mlops\project\docker-compose.yml", "YAML", 0, 38, 0, 0, 0, 0, 0, 3, 41
+"d:\sem9\mlops\project\mlflow.bat", "Batch", 0, 0, 0, 0, 3, 0, 0, 0, 3
+"d:\sem9\mlops\project\models\feature_importance.csv", "CSV", 0, 0, 0, 0, 0, 38, 0, 1, 39
+"d:\sem9\mlops\project\prometheus.yml", "YAML", 0, 0, 0, 0, 0, 0, 0, 1, 1
+"d:\sem9\mlops\project\requirements.txt", "pip requirements", 0, 0, 0, 18, 0, 0, 7, 6, 31
+"d:\sem9\mlops\project\scripts\data_quality_check.py", "Python", 70, 0, 0, 0, 0, 0, 9, 14, 93
+"d:\sem9\mlops\project\scripts\extract_data.py", "Python", 60, 0, 0, 0, 0, 0, 12, 21, 93
+"d:\sem9\mlops\project\scripts\train.py", "Python", 105, 0, 0, 0, 0, 0, 17, 26, 148
+"d:\sem9\mlops\project\scripts\transform_data.py", "Python", 82, 0, 0, 0, 0, 0, 18, 26, 126
+"d:\sem9\mlops\project\test_api.py", "Python", 15, 0, 0, 0, 0, 0, 0, 2, 17
+"Total", "-", 361, 38, 7, 18, 3, 38, 67, 112, 644

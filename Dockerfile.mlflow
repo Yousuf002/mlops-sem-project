@@ -1,0 +1,9 @@
+FROM ghcr.io/mlflow/mlflow:v2.18.0
+
+# Install additional dependencies
+RUN pip install --no-cache-dir \
+    psycopg2-binary \
+    boto3
+
+# Set working directory
+WORKDIR /mlflow
