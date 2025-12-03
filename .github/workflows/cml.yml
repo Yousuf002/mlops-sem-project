@@ -3,7 +3,10 @@ name: CML - Model Performance Gate
 on:
   pull_request:
     branches: [test]
-
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
 jobs:
   cml-report:
     runs-on: ubuntu-latest
