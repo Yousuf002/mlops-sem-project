@@ -7,7 +7,6 @@ on:
 jobs:
   cml-report:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
         with:
@@ -40,36 +39,36 @@ jobs:
 
       - name: Post CML Report
         uses: actions/github-script@v7
+        env:
+          NEW_RMSE: ${{ steps.train_new.outputs.new_rmse }}
+          OLD_RMSE: ${{ steps.train_prod.outputs.old_rmse }}
         with:
           script: |
-            const newRmse = parseFloat("${{ steps.train_new.outputs.new_rmse }}");
-            const oldRmse = parseFloat("${{ steps.train_prod.outputs.old_rmse }}");
+            const newRmse = parseFloat(process.env.NEW_RMSE || '999.0');
+            const oldRmse = parseFloat(process.env.OLD_RMSE || '999.0');
 
-            const verdict =
-              newRmse < oldRmse
-                ? "✔️ New model is **BETTER** — Approved"
-                : "⚠️ New model is **WORSE** — Review needed";
+            const verdict = newRmse < oldRmse
+              ? "New model is **BETTER** — Approved"
+              : "New model is **WORSE** — Review needed";
 
-            const reportLines = [
-              "### 📊 Model Performance Gate (CML Report)",
-              "",
-              "**Data versioned with DVC + stored in MinIO (s3://mlflow)**",
-              "- Local / Real CI: `dvc pull`",
-              "- GitHub Actions demo: uses repository data",
-              "",
-              "| Branch | Test RMSE |",
-              "|--------|----------|",
-              `| master/main | ${oldRmse.toFixed(4)} |`,
-              `| This PR     | ${newRmse.toFixed(4)} |`,
-              "",
-              verdict,
-            ];
+            const report = `
+            ### Model Performance Gate (CML Report)
 
-            const report = reportLines.join("\n");
+            **Data versioned with DVC + stored in MinIO (s3://mlflow)**
+            - Local / Real CI: \`dvc pull\`
+            - GitHub Actions demo: uses data from repository
+
+            | Branch       | Test RMSE     |
+            |--------------|---------------|
+            | master/main  | ${oldRmse.toFixed(4)} |
+            | This PR      | ${newRmse.toFixed(4)} |
+
+            **Verdict:** ${verdict}
+            `.trim();
 
             github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: report,
+              body: report
             });
