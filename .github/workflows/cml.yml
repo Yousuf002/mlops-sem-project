@@ -1,70 +1,59 @@
-name: CML - Model Comparison
+# .github/workflows/cml.yaml
+name: CML - Model Performance Gate
 
 on:
   pull_request:
     branches: [test]
 
 jobs:
-  compare-model:
+  cml-report:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Setup Python
-        uses: actions/setup-python@v4
+      - uses: actions/setup-python@v4
         with:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install dvc[s3] mlflow scikit-learn pandas joblib
+        run: pip install -r requirements.txt scikit-learn pandas joblib
 
-      - name: Setup CML
-        uses: iterative/setup-cml@v2  # ← THIS IS THE FIX (v2 exists here)
-
-      - name: Setup DVC & pull data
-        env:
-          AWS_ACCESS_KEY_ID: minioadmin
-          AWS_SECRET_ACCESS_KEY: minioadmin
+      - name: Train new model (this PR)
         run: |
-          dvc remote add -d storage s3://mlops-bucket
-          dvc remote modify storage endpointurl http://localhost:9000
-          dvc pull || true  # ← Add || true to avoid failure if no data
-
-      - name: Train new model & get RMSE
-        id: train
-        run: |
-          PROCESSED_CSV=$(ls data/processed/*.csv | head -1 || echo "data/processed/processed_data_*.csv")
-          python scripts/train.py $PROCESSED_CSV > train.log 2>&1 || echo "Training failed, using default RMSE"
-          NEW_RMSE=$(grep "Test RMSE" train.log | tail -1 | awk '{print $4}' || echo "999.0")
+          python scripts/train.py data/processed/*.csv > train.log 2>&1
+          NEW_RMSE=$(grep "Test RMSE" train.log | tail -1 | awk '{print $4}' || echo "999")
           echo "NEW_RMSE=$NEW_RMSE" >> $GITHUB_ENV
 
-      - name: Get current production RMSE (from master)
+      - name: Train production model (master)
         run: |
-          git checkout master
-          dvc pull || true
-          PROCESSED_CSV=$(ls data/processed/*.csv | head -1 || echo "data/processed/processed_data_*.csv")
-          python scripts/train.py $PROCESSED_CSV > master.log 2>&1 || echo "Master training failed"
-          OLD_RMSE=$(grep "Test RMSE" master.log | tail -1 | awk '{print $4}' || echo "999.0")
+          git checkout master || git checkout main
+          python scripts/train.py data/processed/*.csv > master.log 2>&1 || true
+          OLD_RMSE=$(grep "Test RMSE" master.log | tail -1 | awk '{print $4}' || echo "999")
           echo "OLD_RMSE=$OLD_RMSE" >> $GITHUB_ENV
 
-      - name: CML Report
-        env:
-          REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          cat > report.md << EOF
-          ### Model Performance Comparison (CML Report)
+      - name: Post CML Report
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const report = `
+            ### Model Performance Gate (CML Report)
 
-          | Branch       | Test RMSE     | Status                    |
-          |--------------|---------------|---------------------------|
-          | master (prod)| $OLD_RMSE     | Current production model  |
-          | This PR      | $NEW_RMSE     | New model                 |
+            **Data is versioned with DVC + stored in MinIO (s3://mlflow)**  
+            In local environment / real CI: \`dvc pull\` is used  
+            In GitHub Actions demo: using processed data from repo
 
-          $(if [ "$(echo "$NEW_RMSE < $OLD_RMSE" | bc -l)" = "1" ]; then echo "✅ New model is better → Safe to merge"; else echo "❌ New model is worse → BLOCKED"; fi)
-          EOF
-          cml comment create report.md
+            | Branch       | Test RMSE   |
+            |--------------|-------------|
+            | master (prod)| ${{ env.OLD_RMSE }} |
+            | This PR      | ${{ env.NEW_RMSE }} |
+
+            ${{ env.NEW_RMSE < env.OLD_RMSE ? 'New model is better → Approved' : 'New model is worse → Review needed'}}
+            `;
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: report
+            });
