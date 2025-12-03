@@ -2,8 +2,8 @@
 name: CML - Model Performance Gate
 
 on:
-  pull_request:
-    branches: [test]
+  push:
+    branches: [dev]
 
 jobs:
   cml-report:
