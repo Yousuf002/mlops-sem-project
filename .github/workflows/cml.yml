@@ -1,4 +1,3 @@
-# .github/workflows/cml.yaml
 name: CML - Model Performance Gate
 
 on:
@@ -42,10 +41,11 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const newRmse = parseFloat('${{ steps.train_new.outputs.new_rmse }}');
-            const oldRmse = parseFloat('${{ steps.train_prod.outputs.old_rmse }}');
-            const verdict = newRmse < oldRmse 
-              ? 'New model is BETTER - Approved' 
+            const newRmse = parseFloat(process.env.new_rmse || '${{ steps.train_new.outputs.new_rmse }}');
+            const oldRmse = parseFloat(process.env.old_rmse || '${{ steps.train_prod.outputs.old_rmse }}');
+
+            const verdict = newRmse < oldRmse
+              ? 'New model is BETTER - Approved'
               : 'New model is WORSE - Review needed';
 
             const report = `
@@ -55,17 +55,17 @@ jobs:
 Locally / real CI: \`dvc pull\` is used  
 GitHub Actions demo: using data from repository
 
-| Branch          | Test RMSE     |
-|-----------------|---------------|
-| master/main     | ${oldRmse.toFixed(4)} |
-| This PR         | ${newRmse.toFixed(4)} |
+| Branch        | Test RMSE     |
+|--------------|---------------|
+| master/main  | ${oldRmse.toFixed(4)} |
+| This PR      | ${newRmse.toFixed(4)} |
 
 **Verdict:** ${verdict}
-            `;
+            `.trim();
 
             github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: report.trim()
+              body: report
             });
