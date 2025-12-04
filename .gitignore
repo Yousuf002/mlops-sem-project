@@ -31,7 +31,6 @@ standalone_admin_password.txt
 
 # Environment
 .env
-config.py
 
 # IDE
 .vscode/
