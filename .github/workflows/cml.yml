@@ -1,4 +1,5 @@
 name: CML - Model Performance Gate
+
 on:
   pull_request:
     branches: [test, main, master]
@@ -7,11 +8,12 @@ permissions:
   contents: read
   pull-requests: write
   issues: write
-  statuses: write   # Needed for createCommitStatus
+  statuses: write
 
 jobs:
   model-comparison:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout PR branch
         uses: actions/checkout@v4
@@ -22,7 +24,7 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
-          cache: 'pip'
+          cache: pip
 
       - name: Install dependencies + DVC
         run: |
@@ -43,33 +45,33 @@ jobs:
           AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION || 'us-east-1' }}
         run: |
           echo "Pulling tracked data with DVC..."
-          dvc pull data/raw data/processed --jobs 8 || echo "DVC pull failed (maybe no data tracked yet)"
+          dvc pull data/raw data/processed --jobs 8 || echo "DVC pull failed"
 
-          echo "Contents of data/ directories:"
-          find data -type f -name "*.csv" -o -name "*.csv.dvc" | head -20 || true
+          echo "Listing data directory..."
+          find data -type f -maxdepth 3 | head -20 || true
 
-          # Fallback: generate synthetic data only if no real processed CSV exists
+          # Fallback synthetic data if needed
           if ! ls data/processed/*.csv >/dev/null 2>&1; then
-            echo "No real processed data found → generating synthetic fallback"
+            echo "No processed data found → generating fallback synthetic data"
             mkdir -p data/raw data/processed
             python - <<'PY'
-            import pandas as pd, numpy as np
-            from datetime import datetime
-            np.random.seed(42)
-            dates = pd.date_range(end=datetime.now(), periods=200, freq='5min')
-            close = 300 + np.linspace(0, 10, 200) + np.random.normal(0, 2, 200)
-            df = pd.DataFrame({
-                'timestamp': dates,
-                'open': close + np.random.uniform(-1, 1, 200),
-                'high': close + np.random.uniform(0, 2, 200),
-                'low': close - np.random.uniform(0, 2, 200),
-                'close': close,
-                'volume': np.random.randint(10000, 100000, 200),
-                'symbol': 'IBM'
-            }).set_index('timestamp')
-            df.to_csv('data/raw/fallback_test.csv')
-            print('Synthetic fallback data created')
-            PY
+import pandas as pd, numpy as np
+from datetime import datetime
+np.random.seed(42)
+dates = pd.date_range(end=datetime.now(), periods=200, freq='5min')
+close = 300 + np.linspace(0, 10, 200) + np.random.normal(0, 2, 200)
+df = pd.DataFrame({
+    'timestamp': dates,
+    'open': close + np.random.uniform(-1, 1, 200),
+    'high': close + np.random.uniform(0, 2, 200),
+    'low': close - np.random.uniform(0, 2, 200),
+    'close': close,
+    'volume': np.random.randint(10000, 100000, 200),
+    'symbol': 'IBM'
+}).set_index('timestamp')
+df.to_csv('data/raw/fallback_test.csv')
+print('Synthetic fallback data created')
+PY
           fi
 
       - name: Transform data (PR branch)
@@ -82,15 +84,11 @@ jobs:
         run: |
           PROCESSED_FILE=$(ls -t data/processed/*.csv 2>/dev/null | head -1 || echo "")
           if [ -z "$PROCESSED_FILE" ]; then
-            echo "No processed data → fallback metrics"
             echo "new_rmse=999.0" >> $GITHUB_OUTPUT
             echo "new_mae=999.0" >> $GITHUB_OUTPUT
             echo "new_r2=0.0" >> $GITHUB_OUTPUT
             exit 0
           fi
-
-          export MLFLOW_TRACKING_URI=""
-          export DAGSHUB_TOKEN=""
 
           python scripts/train.py "$PROCESSED_FILE" > train_pr.log 2>&1 || true
 
@@ -112,7 +110,7 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         run: |
-          dvc pull data/processed --jobs 8 || echo "No base data to pull"
+          dvc pull data/processed --jobs 8 || echo "No base data found"
 
       - name: Train model (base branch)
         id: train_prod
@@ -124,9 +122,6 @@ jobs:
             echo "old_r2=0.0" >> $GITHUB_OUTPUT
             exit 0
           fi
-
-          export MLFLOW_TRACKING_URI=""
-          export DAGSHUB_TOKEN=""
 
           python scripts/train.py "$PROCESSED_FILE" > train_base.log 2>&1 || true
 
@@ -150,4 +145,31 @@ jobs:
         with:
           script: |
             const nr = parseFloat(process.env.NEW_RMSE || 999);
-            const nm = parse
+            const nm = parseFloat(process.env.NEW_MAE || 999);
+            const nr2 = parseFloat(process.env.NEW_R2 || 0);
+
+            const or = parseFloat(process.env.OLD_RMSE || 999);
+            const om = parseFloat(process.env.OLD_MAE || 999);
+            const or2 = parseFloat(process.env.OLD_R2 || 0);
+
+            const body = `
+### 📊 Model Performance Comparison
+
+| Metric | Base Model | PR Model | Change |
+|-------|------------|----------|--------|
+| **RMSE** | ${or} | ${nr} | ${(nr - or).toFixed(4)} |
+| **MAE**  | ${om} | ${nm} | ${(nm - om).toFixed(4)} |
+| **R²**   | ${or2} | ${nr2} | ${(nr2 - or2).toFixed(4)} |
+
+---
+
+### 📌 Decision
+${nr <= or ? "✅ **PR model is better or equal → Approved**" : "❌ **PR model performs worse → Review required**"}
+`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body
+            });
