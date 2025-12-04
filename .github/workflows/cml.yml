@@ -40,7 +40,7 @@ jobs:
         run: |
           dvc remote modify origin --local auth basic
           dvc remote modify origin --local user ${{ secrets.DAGSHUB_USER || 'Yousuf002' }}
-          dvc remote modify origin --local password ${{ secrets.DAGSHUB_TOKEN }}
+          dvc remote modify origin --local password ${{ secrets.DAGSHUB_TOKEN || '4a8466f05f9f3f2c2cb41a4ab9ccb5b6b1050587'}}
         env:
           DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}
 
