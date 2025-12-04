@@ -11,7 +11,6 @@ dist/
 build/
 # Data files
 data/raw/*.csv
-data/processed/*.csv
 
 # Models
 models/*.pkl
@@ -29,7 +28,6 @@ standalone_admin_password.txt
 
 # DVC
 /data/raw/*.csv
-/data/processed/*.csv
 
 # Environment
 .env
