@@ -36,13 +36,38 @@ jobs:
             requests \
             dvc[s3]
 
-      - name: Configure DVC Remote
-        run: |
-          dvc remote modify origin --local auth basic
-          dvc remote modify origin --local user ${{ secrets.DAGSHUB_USER || 'Yousuf002' }}
-          dvc remote modify origin --local password ${{ secrets.DAGSHUB_TOKEN || '4a8466f05f9f3f2c2cb41a4ab9ccb5b6b1050587'}}
+      - name: Configure DVC and DagHub Authentication
         env:
-          DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}
+          DAGSHUB_USER: ${{ secrets.DAGSHUB_USER || 'Yousuf002' }}
+          DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN || '4a8466f05f9f3f2c2cb41a4ab9ccb5b6b1050587' }}
+        run: |
+          # Check if DVC is initialized
+          if [ ! -f .dvc/config ]; then
+            echo "DVC not initialized. Initializing now..."
+            dvc init --no-scm
+          fi
+          
+          # List existing remotes
+          echo "Existing DVC remotes:"
+          dvc remote list || echo "No remotes configured"
+          
+          # Get the default remote name (usually 'origin' or 'storage')
+          REMOTE_NAME=$(dvc remote list | head -1 | awk '{print $1}' || echo "")
+          
+          if [ -z "$REMOTE_NAME" ]; then
+            echo "No DVC remote found. Setting up DagHub remote..."
+            dvc remote add -d origin https://dagshub.com/Yousuf002/mlops-rps-stock-prediction.dvc
+            REMOTE_NAME="origin"
+          fi
+          
+          echo "Using DVC remote: $REMOTE_NAME"
+          
+          # Configure authentication for the remote
+          dvc remote modify $REMOTE_NAME --local auth basic
+          dvc remote modify $REMOTE_NAME --local user ${DAGSHUB_USER}
+          dvc remote modify $REMOTE_NAME --local password ${DAGSHUB_TOKEN}
+          
+          echo "DVC remote configured successfully"
 
       - name: Prepare test data
         run: |
@@ -82,12 +107,23 @@ jobs:
 
       - name: Pull DVC data (PR branch)
         run: |
-          # Pull processed data from DVC
-          dvc pull data/processed/*.csv.dvc 2>&1 | tee dvc_pull_pr.log || echo "Warning: DVC pull failed or no .dvc files found"
+          echo "Attempting to pull DVC-tracked files..."
+          
+          # Check if there are any .dvc files
+          if ls data/processed/*.csv.dvc 1> /dev/null 2>&1; then
+            echo "Found .dvc files. Pulling data..."
+            dvc pull data/processed/*.csv.dvc 2>&1 | tee dvc_pull_pr.log || {
+              echo "Warning: DVC pull encountered errors"
+              cat dvc_pull_pr.log
+            }
+          else
+            echo "No .dvc files found in data/processed/"
+          fi
           
           # List available files
+          echo ""
           echo "Available processed files:"
-          ls -lh data/processed/ || echo "No files in data/processed/"
+          ls -lh data/processed/ 2>/dev/null || echo "No files in data/processed/"
 
       - name: Train model (PR branch)
         id: train_new
@@ -110,9 +146,15 @@ jobs:
 
           python scripts/train.py "$PROCESSED_FILE" > train_pr.log 2>&1 || true
 
-          RMSE=$(grep "Test RMSE:" train_pr.log | tail -1 | awk '{print $NF}' || echo "999.0")
-          MAE=$(grep "Test MAE:" train_pr.log | tail -1 | awk '{print $NF}' || echo "999.0")
-          R2=$(grep "Test R²:" train_pr.log | tail -1 | awk '{print $NF}' || echo "0.0")
+          # Extract metrics with better error handling
+          RMSE=$(grep "Test RMSE:" train_pr.log | tail -1 | awk '{print $NF}' | tr -d '\r' || echo "999.0")
+          MAE=$(grep "Test MAE:" train_pr.log | tail -1 | awk '{print $NF}' | tr -d '\r' || echo "999.0")
+          R2=$(grep "Test R²:" train_pr.log | tail -1 | awk '{print $NF}' | tr -d '\r' || echo "0.0")
+
+          # Validate numeric values
+          RMSE=$(echo "$RMSE" | grep -E '^[0-9]+\.?[0-9]*$' || echo "999.0")
+          MAE=$(echo "$MAE" | grep -E '^[0-9]+\.?[0-9]*$' || echo "999.0")
+          R2=$(echo "$R2" | grep -E '^-?[0-9]+\.?[0-9]*$' || echo "0.0")
 
           echo "new_rmse=$RMSE" >> $GITHUB_OUTPUT
           echo "new_mae=$MAE" >> $GITHUB_OUTPUT
@@ -134,12 +176,23 @@ jobs:
 
       - name: Pull DVC data (base branch)
         run: |
-          # Pull processed data from DVC for base branch
-          dvc pull data/processed/*.csv.dvc 2>&1 | tee dvc_pull_base.log || echo "Warning: DVC pull failed or no .dvc files found"
+          echo "Attempting to pull DVC-tracked files from base branch..."
+          
+          # Check if there are any .dvc files
+          if ls data/processed/*.csv.dvc 1> /dev/null 2>&1; then
+            echo "Found .dvc files. Pulling data..."
+            dvc pull data/processed/*.csv.dvc 2>&1 | tee dvc_pull_base.log || {
+              echo "Warning: DVC pull encountered errors"
+              cat dvc_pull_base.log
+            }
+          else
+            echo "No .dvc files found in data/processed/"
+          fi
           
           # List available files
+          echo ""
           echo "Available processed files:"
-          ls -lh data/processed/ || echo "No files in data/processed/"
+          ls -lh data/processed/ 2>/dev/null || echo "No files in data/processed/"
 
       - name: Train model (base branch)
         id: train_prod
@@ -161,9 +214,15 @@ jobs:
 
           python scripts/train.py "$PROCESSED_FILE" > train_base.log 2>&1 || true
 
-          RMSE=$(grep "Test RMSE:" train_base.log | tail -1 | awk '{print $NF}' || echo "999.0")
-          MAE=$(grep "Test MAE:" train_base.log | tail -1 | awk '{print $NF}' || echo "999.0")
-          R2=$(grep "Test R²:" train_base.log | tail -1 | awk '{print $NF}' || echo "0.0")
+          # Extract metrics with better error handling
+          RMSE=$(grep "Test RMSE:" train_base.log | tail -1 | awk '{print $NF}' | tr -d '\r' || echo "999.0")
+          MAE=$(grep "Test MAE:" train_base.log | tail -1 | awk '{print $NF}' | tr -d '\r' || echo "999.0")
+          R2=$(grep "Test R²:" train_base.log | tail -1 | awk '{print $NF}' | tr -d '\r' || echo "0.0")
+
+          # Validate numeric values
+          RMSE=$(echo "$RMSE" | grep -E '^[0-9]+\.?[0-9]*$' || echo "999.0")
+          MAE=$(echo "$MAE" | grep -E '^[0-9]+\.?[0-9]*$' || echo "999.0")
+          R2=$(echo "$R2" | grep -E '^-?[0-9]+\.?[0-9]*$' || echo "0.0")
 
           echo "old_rmse=$RMSE" >> $GITHUB_OUTPUT
           echo "old_mae=$MAE" >> $GITHUB_OUTPUT
