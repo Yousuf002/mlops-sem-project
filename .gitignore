@@ -28,7 +28,6 @@ standalone_admin_password.txt
 
 # DVC
 /data/raw/*.csv
-/data/processed/*.csv
 
 # Environment
 .env
