@@ -36,38 +36,36 @@ jobs:
             requests \
             dvc[s3]
 
-      - name: Configure DVC and DagHub Authentication
+      - name: Setup DVC Remote for CI (DagHub)
         env:
           DAGSHUB_USER: ${{ secrets.DAGSHUB_USER || 'Yousuf002' }}
           DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN || '4a8466f05f9f3f2c2cb41a4ab9ccb5b6b1050587' }}
         run: |
-          # Check if DVC is initialized
-          if [ ! -f .dvc/config ]; then
-            echo "DVC not initialized. Initializing now..."
-            dvc init --no-scm
+          # Check current DVC configuration
+          echo "Current DVC remotes:"
+          dvc remote list || echo "No remotes found"
+          
+          # Check if dagshub remote exists
+          if dvc remote list | grep -q "dagshub"; then
+            echo "Using existing dagshub remote"
+            REMOTE_NAME="dagshub"
+          else
+            # Add DagHub as a secondary remote for CI/CD
+            echo "Adding DagHub remote for CI/CD..."
+            dvc remote add -f dagshub https://dagshub.com/Yousuf002/mlops-rps-stock-prediction.dvc
+            REMOTE_NAME="dagshub"
           fi
           
-          # List existing remotes
-          echo "Existing DVC remotes:"
-          dvc remote list || echo "No remotes configured"
-          
-          # Get the default remote name (usually 'origin' or 'storage')
-          REMOTE_NAME=$(dvc remote list | head -1 | awk '{print $1}' || echo "")
-          
-          if [ -z "$REMOTE_NAME" ]; then
-            echo "No DVC remote found. Setting up DagHub remote..."
-            dvc remote add -d origin https://dagshub.com/Yousuf002/mlops-rps-stock-prediction.dvc
-            REMOTE_NAME="origin"
-          fi
-          
-          echo "Using DVC remote: $REMOTE_NAME"
-          
-          # Configure authentication for the remote
+          # Configure DagHub authentication
           dvc remote modify $REMOTE_NAME --local auth basic
           dvc remote modify $REMOTE_NAME --local user ${DAGSHUB_USER}
           dvc remote modify $REMOTE_NAME --local password ${DAGSHUB_TOKEN}
           
-          echo "DVC remote configured successfully"
+          # Use DagHub remote for this CI run
+          dvc remote default $REMOTE_NAME --local
+          
+          echo "DVC configured to use: $REMOTE_NAME"
+          dvc remote list
 
       - name: Prepare test data
         run: |
@@ -105,22 +103,22 @@ jobs:
           python scripts/transform_data.py data/raw/test_stock_data.csv > transform_pr.log 2>&1
           echo "Data transformation complete (PR)"
 
-      - name: Pull DVC data (PR branch)
+      - name: Pull DVC data (PR branch) - Optional
+        continue-on-error: true
         run: |
-          echo "Attempting to pull DVC-tracked files..."
+          echo "Attempting to pull DVC-tracked files from DagHub..."
           
-          # Check if there are any .dvc files
+          # Try to pull, but don't fail if data isn't on DagHub yet
           if ls data/processed/*.csv.dvc 1> /dev/null 2>&1; then
-            echo "Found .dvc files. Pulling data..."
+            echo "Found .dvc files. Attempting pull from DagHub..."
             dvc pull data/processed/*.csv.dvc 2>&1 | tee dvc_pull_pr.log || {
-              echo "Warning: DVC pull encountered errors"
-              cat dvc_pull_pr.log
+              echo "⚠️  DVC pull failed - data may not be pushed to DagHub yet"
+              echo "Will use freshly transformed data instead"
             }
           else
-            echo "No .dvc files found in data/processed/"
+            echo "ℹ️  No .dvc files found - using freshly transformed data"
           fi
           
-          # List available files
           echo ""
           echo "Available processed files:"
           ls -lh data/processed/ 2>/dev/null || echo "No files in data/processed/"
@@ -128,23 +126,31 @@ jobs:
       - name: Train model (PR branch)
         id: train_new
         run: |
-          # Find the most recent CSV file (pulled from DVC or newly created)
+          # Find the most recent CSV file
           PROCESSED_FILE=$(ls -t data/processed/*.csv 2>/dev/null | head -1 || echo "")
           
           if [ -z "$PROCESSED_FILE" ]; then
-            echo "No processed data found"
+            echo "❌ No processed data found"
             echo "new_rmse=999.0" >> $GITHUB_OUTPUT
             echo "new_mae=999.0" >> $GITHUB_OUTPUT
             echo "new_r2=0.0" >> $GITHUB_OUTPUT
             exit 0
           fi
 
-          echo "Training with file: $PROCESSED_FILE"
+          echo "✅ Training with file: $PROCESSED_FILE"
+          ls -lh "$PROCESSED_FILE"
 
           export MLFLOW_TRACKING_URI=""
           export DAGSHUB_TOKEN=""
 
           python scripts/train.py "$PROCESSED_FILE" > train_pr.log 2>&1 || true
+
+          # Display training log for debugging
+          echo ""
+          echo "=== Training Log Preview ==="
+          tail -20 train_pr.log
+          echo "==========================="
+          echo ""
 
           # Extract metrics with better error handling
           RMSE=$(grep "Test RMSE:" train_pr.log | tail -1 | awk '{print $NF}' | tr -d '\r' || echo "999.0")
@@ -159,7 +165,12 @@ jobs:
           echo "new_rmse=$RMSE" >> $GITHUB_OUTPUT
           echo "new_mae=$MAE" >> $GITHUB_OUTPUT
           echo "new_r2=$R2" >> $GITHUB_OUTPUT
-          echo "PR Model - RMSE: $RMSE, MAE: $MAE, R²: $R2"
+          
+          echo ""
+          echo "📊 PR Model Metrics:"
+          echo "   RMSE: $RMSE"
+          echo "   MAE:  $MAE"
+          echo "   R²:   $R2"
 
       - name: Checkout base branch (main/master)
         run: |
@@ -170,26 +181,26 @@ jobs:
         run: |
           if [ -f scripts/transform_data.py ]; then
             python scripts/transform_data.py data/raw/test_stock_data.csv > transform_base.log 2>&1
+            echo "✅ Data transformation complete (base branch)"
           else
-            echo "transform_data.py missing in base branch"
+            echo "⚠️  transform_data.py missing in base branch"
           fi
 
-      - name: Pull DVC data (base branch)
+      - name: Pull DVC data (base branch) - Optional
+        continue-on-error: true
         run: |
-          echo "Attempting to pull DVC-tracked files from base branch..."
+          echo "Attempting to pull DVC-tracked files from DagHub (base branch)..."
           
-          # Check if there are any .dvc files
           if ls data/processed/*.csv.dvc 1> /dev/null 2>&1; then
-            echo "Found .dvc files. Pulling data..."
+            echo "Found .dvc files. Attempting pull from DagHub..."
             dvc pull data/processed/*.csv.dvc 2>&1 | tee dvc_pull_base.log || {
-              echo "Warning: DVC pull encountered errors"
-              cat dvc_pull_base.log
+              echo "⚠️  DVC pull failed - data may not be pushed to DagHub yet"
+              echo "Will use freshly transformed data instead"
             }
           else
-            echo "No .dvc files found in data/processed/"
+            echo "ℹ️  No .dvc files found - using freshly transformed data"
           fi
           
-          # List available files
           echo ""
           echo "Available processed files:"
           ls -lh data/processed/ 2>/dev/null || echo "No files in data/processed/"
@@ -200,19 +211,27 @@ jobs:
           PROCESSED_FILE=$(ls -t data/processed/*.csv 2>/dev/null | head -1 || echo "")
           
           if [ -z "$PROCESSED_FILE" ] || [ ! -f scripts/train.py ]; then
-            echo "Skipping base model training"
+            echo "⚠️  Skipping base model training"
             echo "old_rmse=999.0" >> $GITHUB_OUTPUT
             echo "old_mae=999.0" >> $GITHUB_OUTPUT
             echo "old_r2=0.0" >> $GITHUB_OUTPUT
             exit 0
           fi
 
-          echo "Training with file: $PROCESSED_FILE"
+          echo "✅ Training with file: $PROCESSED_FILE"
+          ls -lh "$PROCESSED_FILE"
 
           export MLFLOW_TRACKING_URI=""
           export DAGSHUB_TOKEN=""
 
           python scripts/train.py "$PROCESSED_FILE" > train_base.log 2>&1 || true
+
+          # Display training log for debugging
+          echo ""
+          echo "=== Training Log Preview ==="
+          tail -20 train_base.log
+          echo "==========================="
+          echo ""
 
           # Extract metrics with better error handling
           RMSE=$(grep "Test RMSE:" train_base.log | tail -1 | awk '{print $NF}' | tr -d '\r' || echo "999.0")
@@ -227,7 +246,12 @@ jobs:
           echo "old_rmse=$RMSE" >> $GITHUB_OUTPUT
           echo "old_mae=$MAE" >> $GITHUB_OUTPUT
           echo "old_r2=$R2" >> $GITHUB_OUTPUT
-          echo "Base Model - RMSE: $RMSE, MAE: $MAE, R²: $R2"
+          
+          echo ""
+          echo "📊 Base Model Metrics:"
+          echo "   RMSE: $RMSE"
+          echo "   MAE:  $MAE"
+          echo "   R²:   $R2"
 
       - name: Generate CML Report
         uses: actions/github-script@v7
@@ -262,7 +286,7 @@ jobs:
             };
 
             const report = `
-            ## ${overallBetter ? "✅ Model Improved" : "⚠️ Performance Degraded"} Model Performance Report
+            ## ${overallBetter ? "✅ Model Improved" : "⚠️ Performance Degraded"} - Model Performance Report
 
             ### Metrics Summary
             | Metric | Base Branch | This PR   | Change              | Status     |
@@ -275,6 +299,10 @@ jobs:
             ${overallBetter 
               ? "**✅ APPROVED** - Model performance improved or maintained" 
               : "**⚠️ REVIEW NEEDED** - Model performance degraded"}
+            
+            ### Notes
+            - Using freshly generated test data (same seed for consistency)
+            - DVC storage: MinIO (localhost) not accessible in CI - using DagHub or fresh transformations
 
             <sub>Generated by CML Bot • [View Run](${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID})</sub>
             `.trim();
