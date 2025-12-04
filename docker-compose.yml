@@ -31,32 +31,6 @@ services:
       - minio-data:/data
     restart: unless-stopped
 
-  mlflow:
-    build:
-      context: .
-      dockerfile: Dockerfile.mlflow
-    container_name: mlops-mlflow
-    ports:
-      - "5001:5000"
-    environment:
-      - MLFLOW_S3_ENDPOINT_URL=http://minio:9000
-      - AWS_ACCESS_KEY_ID=minioadmin
-      - AWS_SECRET_ACCESS_KEY=minioadmin
-    command: >
-      mlflow server
-      --host 0.0.0.0
-      --port 5000
-      --backend-store-uri postgresql://airflow:airflow@postgres:5432/mlflow
-      --default-artifact-root s3://mlflow/
-    volumes:
-      - mlflow-data:/mlflow
-    depends_on:
-      postgres:
-        condition: service_healthy
-      minio:
-        condition: service_started
-    restart: unless-stopped
-
   airflow-init:
     build:
       context: .
@@ -71,6 +45,10 @@ services:
       - _AIRFLOW_WWW_USER_USERNAME=admin
       - _AIRFLOW_WWW_USER_PASSWORD=admin
       - ALPHA_VANTAGE_API_KEY=42MPNIZX1S8YL97E
+      - DAGSHUB_REPO_OWNER=Yousuf002  # ← CHANGE THIS
+      - DAGSHUB_REPO_NAME=mlops-rps-stock-prediction   # ← CHANGE THIS
+      - DAGSHUB_USER=Yousuf002         # ← CHANGE THIS
+      - DAGSHUB_TOKEN=4a8466f05f9f3f2c2cb41a4ab9ccb5b6b1050587  # ← CHANGE THIS
     volumes:
       - ./dags:/opt/airflow/dags
       - ./scripts:/opt/airflow/scripts
@@ -94,11 +72,11 @@ services:
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
       - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
       - AIRFLOW__CORE__LOAD_EXAMPLES=False
-      - MLFLOW_TRACKING_URI=http://mlflow:5000
-      - AWS_ACCESS_KEY_ID=minioadmin
-      - AWS_SECRET_ACCESS_KEY=minioadmin
-      - MLFLOW_S3_ENDPOINT_URL=http://minio:9000
       - ALPHA_VANTAGE_API_KEY=42MPNIZX1S8YL97E
+      - DAGSHUB_REPO_OWNER=Yousuf002  # ← CHANGE THIS
+      - DAGSHUB_REPO_NAME=mlops-rps-stock-prediction   # ← CHANGE THIS
+      - DAGSHUB_USER=Yousuf002         # ← CHANGE THIS
+      - DAGSHUB_TOKEN=4a8466f05f9f3f2c2cb41a4ab9ccb5b6b1050587  # ← CHANGE THIS
     volumes:
       - ./dags:/opt/airflow/dags
       - ./scripts:/opt/airflow/scripts
@@ -112,8 +90,6 @@ services:
         condition: service_healthy
       airflow-init:
         condition: service_completed_successfully
-      mlflow:
-        condition: service_started
     command: airflow webserver
     restart: unless-stopped
 
@@ -126,11 +102,11 @@ services:
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
       - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
       - AIRFLOW__CORE__LOAD_EXAMPLES=False
-      - MLFLOW_TRACKING_URI=http://mlflow:5000
-      - AWS_ACCESS_KEY_ID=minioadmin
-      - AWS_SECRET_ACCESS_KEY=minioadmin
-      - MLFLOW_S3_ENDPOINT_URL=http://minio:9000
       - ALPHA_VANTAGE_API_KEY=42MPNIZX1S8YL97E
+      - DAGSHUB_REPO_OWNER=Yousuf002  # ← CHANGE THIS
+      - DAGSHUB_REPO_NAME=mlops-rps-stock-prediction   # ← CHANGE THIS
+      - DAGSHUB_USER=Yousuf002         # ← CHANGE THIS
+      - DAGSHUB_TOKEN=4a8466f05f9f3f2c2cb41a4ab9ccb5b6b1050587
     volumes:
       - ./dags:/opt/airflow/dags
       - ./scripts:/opt/airflow/scripts
@@ -142,8 +118,6 @@ services:
         condition: service_healthy
       airflow-init:
         condition: service_completed_successfully
-      mlflow:
-        condition: service_started
     command: airflow scheduler
     restart: unless-stopped
 
@@ -188,6 +162,5 @@ services:
 volumes:
   postgres-data:
   minio-data:
-  mlflow-data:
   prometheus-data:
   grafana-data:

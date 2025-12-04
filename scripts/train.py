@@ -12,24 +12,39 @@ import sys
 
 # Add parent directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config import MLFLOW_TRACKING_URI, MODEL_PATH
+from config import MODEL_PATH
 
-# ============ ADD THIS SECTION ============
-# Configure S3 (MinIO) for MLflow artifact storage
-os.environ['MLFLOW_S3_ENDPOINT_URL'] = os.getenv('MLFLOW_S3_ENDPOINT_URL', 'http://localhost:9000')
-os.environ['AWS_ACCESS_KEY_ID'] = os.getenv('AWS_ACCESS_KEY_ID', 'minioadmin')
-os.environ['AWS_SECRET_ACCESS_KEY'] = os.getenv('AWS_SECRET_ACCESS_KEY', 'minioadmin')
-# ==========================================
+# ============ DAGSHUB CONFIGURATION ============
+DAGSHUB_REPO_OWNER = "Yousuf002"
+DAGSHUB_REPO_NAME = "mlops-rps-stock-prediction"
+
+# Get DagHub credentials from environment variables
+DAGSHUB_USER = os.getenv('DAGSHUB_USER', DAGSHUB_REPO_OWNER)
+DAGSHUB_TOKEN = os.getenv('DAGSHUB_TOKEN', '4a8466f05f9f3f2c2cb41a4ab9ccb5b6b1050587')
+
+# Set MLflow tracking URI to DagHub
+MLFLOW_TRACKING_URI = f'https://dagshub.com/{DAGSHUB_REPO_OWNER}/{DAGSHUB_REPO_NAME}.mlflow'
+mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+
+# Set DagHub authentication for MLflow
+os.environ['MLFLOW_TRACKING_USERNAME'] = DAGSHUB_USER
+os.environ['MLFLOW_TRACKING_PASSWORD'] = DAGSHUB_TOKEN
+
+print(f"\n{'='*60}")
+print(f"DagHub Configuration (Direct MLflow)")
+print(f"{'='*60}")
+print(f"MLflow Tracking URI: {MLFLOW_TRACKING_URI}")
+print(f"Repository: {DAGSHUB_REPO_OWNER}/{DAGSHUB_REPO_NAME}")
+print(f"Authenticated as: {DAGSHUB_USER}")
+print(f"{'='*60}\n")
+# ================================================
 
 def train_model(processed_filepath):
-    """Train stock price prediction model with MLflow tracking"""
+    """Train stock price prediction model with MLflow tracking on DagHub"""
     
     print(f"\n{'='*60}")
     print(f"Model Training")
     print(f"{'='*60}")
-    
-    # Set MLflow tracking URI
-    mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
     
     # Set experiment name
     experiment_name = "stock-price-prediction"
@@ -63,15 +78,17 @@ def train_model(processed_filepath):
         mlflow.log_param("date_range", f"{df.index.min()} to {df.index.max()}")
         mlflow.log_param("stock_symbol", df['symbol'].iloc[0] if 'symbol' in df.columns else 'N/A')
         
-        # === ONLY CHANGE: create directory first + print real values ===
-        os.makedirs(MODEL_PATH, exist_ok=True)   # ← THIS FIXES THE ERROR
+        # Create directory for saving artifacts
+        os.makedirs(MODEL_PATH, exist_ok=True)
         
+        # Calculate and save feature ranges for OOD detection
         feature_mins = X_train.min().values
         feature_maxs = X_train.max().values
         
         np.save(f"{MODEL_PATH}/feature_min.npy", feature_mins)
         np.save(f"{MODEL_PATH}/feature_max.npy", feature_maxs)
         
+        # Log feature ranges as artifacts to DagHub
         mlflow.log_artifact(f"{MODEL_PATH}/feature_min.npy")
         mlflow.log_artifact(f"{MODEL_PATH}/feature_max.npy")
         
@@ -81,7 +98,6 @@ def train_model(processed_filepath):
         print("FEATURE_MIN = np.array(" + str(list(feature_mins)) + ")")
         print("FEATURE_MAX = np.array(" + str(list(feature_maxs)) + ")")
         print("="*60 + "\n")
-        # ====================================================================
 
         # Define hyperparameters
         params = {
@@ -116,7 +132,7 @@ def train_model(processed_filepath):
         train_r2 = r2_score(y_train, y_train_pred)
         test_r2 = r2_score(y_test, y_test_pred)
         
-        # Log metrics
+        # Log metrics to DagHub
         mlflow.log_metric("train_rmse", train_rmse)
         mlflow.log_metric("test_rmse", test_rmse)
         mlflow.log_metric("train_mae", train_mae)
@@ -138,16 +154,22 @@ def train_model(processed_filepath):
         for idx, row in feature_importance.head(10).iterrows():
             print(f"  {row['feature']}: {row['importance']:.4f}")
         
-        # Log model
+        # Log model to DagHub (WITHOUT model registry)
+        print("\nLogging model to MLflow...")
         mlflow.sklearn.log_model(
             sk_model=model,
-            artifact_path="model",
-        ) 
+            artifact_path="model"
+        )
+        print("✅ Model successfully logged to DagHub")
         
         # Save model locally
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         model_filename = f"{MODEL_PATH}/model_{timestamp}.joblib"
         joblib.dump(model, model_filename)
+        
+        # Also save as latest for easy access
+        latest_model_path = f"{MODEL_PATH}/model_latest.joblib"
+        joblib.dump(model, latest_model_path)
         
         print(f"\n{'='*60}")
         print(f"Model Training Complete!")
@@ -161,6 +183,8 @@ def train_model(processed_filepath):
         print(f"  Test R²:    {test_r2:.4f}")
         print(f"{'='*60}")
         print(f"Model saved to: {model_filename}")
+        print(f"Latest model: {latest_model_path}")
+        print(f"DagHub Experiment URL: https://dagshub.com/{DAGSHUB_REPO_OWNER}/{DAGSHUB_REPO_NAME}/experiments")
         print(f"{'='*60}\n")
         
         return model_filename, test_rmse
