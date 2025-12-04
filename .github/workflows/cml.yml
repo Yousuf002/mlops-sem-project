@@ -42,17 +42,20 @@ jobs:
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION || 'us-east-1' }}
+          AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
         run: |
+          # use a shell fallback for the region if secret isn't provided
+          export AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-us-east-1}
+
           echo "Pulling tracked data with DVC..."
-          dvc pull data/raw data/processed --jobs 8 || echo "DVC pull failed"
+          dvc pull data/raw data/processed --jobs 8 || echo "DVC pull failed (maybe no data tracked yet)"
 
-          echo "Listing data directory..."
-          find data -type f -maxdepth 3 | head -20 || true
+          echo "Listing data directory (first 20 files):"
+          find data -maxdepth 3 -type f | head -20 || true
 
-          # Fallback synthetic data if needed
+          # Fallback: generate synthetic data only if no real processed CSV exists
           if ! ls data/processed/*.csv >/dev/null 2>&1; then
-            echo "No processed data found → generating fallback synthetic data"
+            echo "No real processed data found → generating synthetic fallback"
             mkdir -p data/raw data/processed
             python - <<'PY'
 import pandas as pd, numpy as np
@@ -110,7 +113,7 @@ PY
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         run: |
-          dvc pull data/processed --jobs 8 || echo "No base data found"
+          dvc pull data/processed --jobs 8 || echo "No base data to pull"
 
       - name: Train model (base branch)
         id: train_prod
@@ -156,7 +159,7 @@ PY
 ### 📊 Model Performance Comparison
 
 | Metric | Base Model | PR Model | Change |
-|-------|------------|----------|--------|
+|-------|------------:|---------:|-------:|
 | **RMSE** | ${or} | ${nr} | ${(nr - or).toFixed(4)} |
 | **MAE**  | ${om} | ${nm} | ${(nm - om).toFixed(4)} |
 | **R²**   | ${or2} | ${nr2} | ${(nr2 - or2).toFixed(4)} |
@@ -167,7 +170,7 @@ PY
 ${nr <= or ? "✅ **PR model is better or equal → Approved**" : "❌ **PR model performs worse → Review required**"}
 `;
 
-            github.rest.issues.createComment({
+            await github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
