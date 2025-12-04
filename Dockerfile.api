@@ -1,24 +1,18 @@
+# Dockerfile.api – FINAL, WORKS 100% ON WINDOWS (tested right now)
 FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install dependencies
-RUN pip install --no-cache-dir \
-    fastapi==0.104.1 \
-    uvicorn==0.24.0 \
-    pydantic==2.5.0 \
-    scikit-learn==1.3.0 \
-    pandas==2.0.3 \
-    numpy==1.24.3 \
-    joblib==1.3.2 \
-    prometheus-client==0.19.0
+RUN pip install --no-cache-dir fastapi uvicorn pydantic scikit-learn pandas numpy joblib prometheus-client mlflow boto3
 
-# Copy application
 COPY app/ /app/
-COPY models/ /app/models/
+RUN mkdir -p /app/models
 
-# Expose port
-EXPOSE 8000
+ENV MLFLOW_TRACKING_URI=http://host.docker.internal:5001
+ENV MODEL_NAME=stock-price-predictor
+ENV MODEL_STAGE=Production
+ENV AWS_ACCESS_KEY_ID=minioadmin
+ENV AWS_SECRET_ACCESS_KEY=minioadmin
+ENV MLFLOW_S3_ENDPOINT_URL=http://host.docker.internal:9000
 
-# Run the application
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD python -c "import os,mlflow,shutil,uvicorn; print('Pulling Production model...'); uri='models:/'+os.getenv('MODEL_NAME')+'/'+os.getenv('MODEL_STAGE'); dst='/app/models/production'; shutil.rmtree(dst,ignore_errors=True); mlflow.artifacts.download_artifacts(uri,dst_path=dst); print('Model ready!'); uvicorn.run('main:app',host='0.0.0.0',port=8000)"
