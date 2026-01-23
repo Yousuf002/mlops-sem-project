@@ -39,7 +39,7 @@ jobs:
       - name: Setup DVC Remote for CI (DagHub)
         env:
           DAGSHUB_USER: ${{ secrets.DAGSHUB_USER || 'Yousuf002' }}
-          DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN || '4a8466f05f9f3f2c2cb41a4ab9ccb5b6b1050587' }}
+          DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN || '1553715164cf3b205ef34f395328e6c4ba25b307' }}
         run: |
           # Check current DVC configuration
           echo "Current DVC remotes:"
